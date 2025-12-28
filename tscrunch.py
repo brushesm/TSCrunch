@@ -5,40 +5,44 @@ TSCrunch 1.3.1 - binary cruncher, by Antonio Savona
 """
 
 import sys
+from dataclasses import dataclass
+from enum import IntEnum
 
-REVERSELITERAL	=	False
-VERBOSE			=	True
-PRG				=	False
-SFX 			=	False
+REVERSELITERAL	= 	False
+VERBOSE			= 	True
+PRG				= 	False
+SFX 			= 	False
 SFXMODE 		= 	0
-INPLACE			=	False
-BLANK 			=	False
+INPLACE			= 	False
+BLANK 			= 	False
 
 DEBUG 			= 	False
 
-LONGESTRLE		=	64
-LONGESTLONGLZ	=	64 
-LONGESTLZ 		=	32
-LONGESTLITERAL	=	31
-MINRLE			=	2
-MINLZ			=	3
-LZOFFSET 		=	256
-LONGLZOFFSET	=	32767
-LZ2OFFSET 		=	94
-LZ2SIZE 		=	2
+LONGESTRLE		= 	64
+LONGESTLONGLZ	= 	64 
+LONGESTLZ 		= 	32
+LONGESTLITERAL	= 	31
+MINRLE			= 	2
+MINLZ			= 	3
+LZOFFSET 		= 	256
+LONGLZOFFSET	= 	32767
+LZ2OFFSET 		= 	94
+LZ2SIZE 		= 	2
 
 RLEMASK 		= 	0x81
 LZMASK			= 	0x80
 LITERALMASK 	= 	0x00
-LZ2MASK 		=	0x00
+LZ2MASK 		= 	0x00
 
-TERMINATOR 		=	LONGESTLITERAL + 1 
+TERMINATOR 		= 	LONGESTLITERAL + 1 
 
-ZERORUNID		=	4
-LZ2ID 			=	3
-LZID 			= 	2
-RLEID 			= 	1
-LITERALID 		= 	0
+
+class TokenType(IntEnum):
+	LITERAL = 0
+	RLE = 1
+	LZ = 2
+	LZ2 = 3
+	ZERORUN = 4
 
 
 from scipy.sparse.csgraph import dijkstra
@@ -120,12 +124,15 @@ boot2 = [
 
 	]
 
+
 def load_raw(fi):
 	data = bytes(fi.read())
 	return data
 
+
 def save_raw(fo, data):
 	fo.write(bytes(data))
+
 
 #finds all the occurrences of prefix in the range [max(0,i - LONGLZOFFSET) i) 	
 #the search window is quite small, so brute force here performs as well as suffix trees
@@ -141,11 +148,14 @@ def findall(data, prefix, i, minlz = MINLZ):
 	
 #pretty prints a progress bar	
 def progress(description, current, total):
+	if total <= 0:
+		return
 	percentage = 100 * current // total
 	tchars = 16 * current // total
 	sys.stdout.write("\r%s [%s%s]%02d%%" %(description, '*'*tchars, ' '*(16-tchars), percentage))
 	
 	
+
 def findOptimalZero(src):
 	zeroruns = dict()
 	i = 0
@@ -165,7 +175,7 @@ def findOptimalZero(src):
 		return 	min(list(zeroruns.items()), key = lambda x:-x[0]*(x[1]**1.1))[0]
 	else: 
 		return LONGESTRLE	
-	
+		
 	
 class Token:
 	def __init__(self, src = None):
@@ -174,7 +184,7 @@ class Token:
 
 class ZERORUN(Token):
 	def __init__(self, src, i, size = LONGESTRLE, token = None):
-		self.type = ZERORUNID
+		self.type = TokenType.ZERORUN
 		self.size = size
 		if token != None:
 			self.fromToken(token)
@@ -190,7 +200,7 @@ class ZERORUN(Token):
 	
 class RLE(Token):
 	def __init__(self, src, i, size = None, token = None):
-		self.type = RLEID
+		self.type = TokenType.RLE
 		self.rleByte = src[i]
 		
 		if token != None:
@@ -213,7 +223,7 @@ class RLE(Token):
 	
 class LZ(Token):
 	def __init__(self, src, i, size = None, offset = None, minlz = MINLZ, token = None):
-		self.type = LZID
+		self.type = TokenType.LZ
 	
 		if token != None:
 			self.fromToken(token)
@@ -230,7 +240,7 @@ class LZ(Token):
 						l+=1
 					if (l > bestlen and (i - j < LZOFFSET or i - bestpos >= LZOFFSET or l > LONGESTLZ)) or (l > bestlen + 1):
 						bestpos, bestlen = j , l
-	
+		
 			self.size = bestlen
 			self.offset = i - bestpos	
 			
@@ -255,7 +265,7 @@ class LZ(Token):
 
 class LZ2(Token):
 	def __init__(self, src, i, offset = None, token = None):
-		self.type = LZ2ID
+		self.type = TokenType.LZ2
 		self.size = 2
 		
 		if token != None:
@@ -270,7 +280,7 @@ class LZ2(Token):
 					self.offset = -1
 			
 			else:
-				 self.offset = -1
+				self.offset = -1
 			
 		else:
 			self.offset = offset
@@ -285,9 +295,10 @@ class LZ2(Token):
 	
 class LIT(Token):
 	def __init__(self, src, i, token = None):
-		self.type = LITERALID	
+		self.type = TokenType.LITERAL	
 		self.size = 1
 		self.start = i
+		self.src = src
 
 		if token != None:
 			self.fromToken(token)
@@ -296,17 +307,31 @@ class LIT(Token):
 		return self.size + 1 + 0.00130 - 0.00001 * self.size
 
 	def getPayload(self):
-		return bytes([LITERALMASK | (self.size)]) + src[self.start : self.start + self.size]
+		return bytes([LITERALMASK | (self.size)]) + self.src[self.start : self.start + self.size]
 	
 	
+@dataclass
+class Options:
+	verbose: bool = VERBOSE
+	reverse_literal: bool = REVERSELITERAL
+	prg: bool = PRG
+	sfx: bool = SFX
+	sfxmode: int = SFXMODE
+	inplace: bool = INPLACE
+	blank: bool = BLANK
+	debug: bool = DEBUG
+
+
 class Cruncher:
 
-	def __init__(self, src = None):
+	def __init__(self, src = None, options = None, addr = None):
 		self.crunched = []
 		self.token_list = []
 		self.src = src
 		self.graph = dict()
 		self.crunchedSize = 0
+		self.options = options or Options()
+		self.addr = addr
 
 	def get_path(self, p):	
 		i = len(p) - 1
@@ -321,13 +346,8 @@ class Cruncher:
 		self.crunched = bytes(data) + bytes(self.crunched)
 
 	def ocrunch(self):
-		from concurrent.futures import ThreadPoolExecutor
-		from multiprocessing import cpu_count
-		import itertools
-		from scipy.sparse import csr_matrix
-		from scipy.sparse.csgraph import dijkstra
 
-		if INPLACE:	
+		if self.options.inplace:	
 			remainder = self.src[-1:]
 			src = bytes(self.src[:-1])
 		else:
@@ -336,7 +356,7 @@ class Cruncher:
 		self.optimalRun = findOptimalZero(src)
 
 		progress_string = "Populating LZ layer\t"
-		if VERBOSE:
+		if self.options.verbose:
 			progress(progress_string, 0, 1)
 
 		def process_token_candidates(i):
@@ -370,66 +390,45 @@ class Cruncher:
 
 			return tmp_graph
 
-		with ThreadPoolExecutor(max_workers=cpu_count()) as executor:
-			results = executor.map(process_token_candidates, range(len(src)))
-			for partial_graph in results:
-				self.graph.update(partial_graph)
+		for i in range(len(src)):
+			self.graph.update(process_token_candidates(i))
 
-		if VERBOSE:
+		if self.options.verbose:
 			progress(progress_string, 1, 1)
 			sys.stdout.write('\n')
 
 		progress_string = "Closing gaps\t\t"
-		if VERBOSE:
+		if self.options.verbose:
 			progress(progress_string, 0, 1)
 
-		def fill_literals_chunk(start, end):
-			tmp_graph = {}
-			for i in range(start, end):
-				for j in range(1, min(LONGESTLITERAL + 1, len(src) + 1 - i)):
-					if (i, i + j) not in self.graph:
-						lit = LIT(src, i)
-						lit.size = j
-						tmp_graph[(i, i + j)] = lit
-			return tmp_graph
+		for i in range(len(src) - 1):
+			for j in range(1, min(LONGESTLITERAL + 1, len(src) + 1 - i)):
+				if (i, i + j) not in self.graph:
+					lit = LIT(src, i)
+					lit.size = j
+					self.graph[(i, i + j)] = lit
 
-		chunksize = 512
-		indices = [(i, min(i + chunksize, len(src) - 1)) for i in range(0, len(src) - 1, chunksize)]
-		with ThreadPoolExecutor(max_workers=cpu_count()) as executor:
-			results = executor.map(lambda args: fill_literals_chunk(*args), indices)
-			for partial_graph in results:
-				self.graph.update(partial_graph)
-
-		if VERBOSE:
+		if self.options.verbose:
 			progress(progress_string, 1, 1)
 			sys.stdout.write('\n')
 
 		progress_string = "Populating graph\t"
-		if VERBOSE:
+		if self.options.verbose:
 			progress(progress_string, 0, 3)
 
 		graph_items = list(self.graph.items())
 
-		def compute_weights_for_chunk(chunk):
-			return [v.getCost() for _, v in chunk]
-
-		chunk_size = max(1, len(graph_items) // cpu_count())
-		chunks = [graph_items[i:i + chunk_size] for i in range(0, len(graph_items), chunk_size)]
-
-		with ThreadPoolExecutor(max_workers=cpu_count()) as executor:
-			weights_chunks = list(executor.map(compute_weights_for_chunk, chunks))
-
-		weights = list(itertools.chain.from_iterable(weights_chunks))
+		weights = [v.getCost() for _, v in graph_items]
 		sources = tuple(s for s, _ in self.graph.keys())
 		targets = tuple(t for _, t in self.graph.keys())
 
-		if VERBOSE:
+		if self.options.verbose:
 			progress(progress_string, 1, 3)
 
 		n = len(src) + 1
 		dgraph = csr_matrix((weights, (sources, targets)), shape=(n, n))
 
-		if VERBOSE:
+		if self.options.verbose:
 			progress(progress_string, 2, 3)
 			progress(progress_string, 3, 3)
 			sys.stdout.write('\ncomputing shortest path\n')
@@ -439,7 +438,7 @@ class Cruncher:
 			self.token_list.append(self.graph[key])
 
 
-		if INPLACE:
+		if self.options.inplace:
 			safety = len(self.token_list)
 			segment_uncrunched_size = 0
 			segment_crunched_size = 0
@@ -458,30 +457,30 @@ class Cruncher:
 			if total_uncrunched_size > 0:
 				remainder = src[-total_uncrunched_size:] + remainder
 			self.crunched.extend(bytes([TERMINATOR]) + remainder[1:])
-			self.crunched = addr + bytes([self.optimalRun - 1]) + remainder[:1] + bytes(self.crunched)
+			self.crunched = self.addr + bytes([self.optimalRun - 1]) + remainder[:1] + bytes(self.crunched)
 			
 		else:
-			if not SFX:
+			if not self.options.sfx:
 				self.crunched.extend([self.optimalRun - 1])
 			for token in (self.token_list):
 				self.crunched.extend(token.getPayload())	
 			self.crunched = bytes(self.crunched + [TERMINATOR])
 		self.crunchedSize = len(self.crunched)	
 
-		if DEBUG:
+		if self.options.debug:
 			nlz2 = 0; nlzl = 0; nlz = 0; nrle = 0; nlit = 0; nz = 0; nlit1 = 0
 			lzstat = [0] * (LONGESTLONGLZ + 1)
 
 			for token in self.token_list:
-				if token.type == LITERALID:
+				if token.type == TokenType.LITERAL:
 					nlit+=1
 					if token.size == 1:
 						nlit1+=1
-				elif token.type == LZ2ID:
+				elif token.type == TokenType.LZ2:
 					nlz2+=1
-				elif token.type == RLEID:
+				elif token.type == TokenType.RLE:
 					nrle +=1
-				elif token.type == ZERORUNID:
+				elif token.type == TokenType.ZERORUN:
 					nz +=1
 				else:
 					stat = (token.getPayload()[0] & 0x7f) >> 2
@@ -508,14 +507,15 @@ class Cruncher:
 			for i, val in enumerate(data):
 				filled = int(val / max_val * bar_width)
 				empty = bar_width - filled
-				bar = f"[bold green]{'█' * filled}[/][dim]{'░' * empty}[/]"
+				bar = f"[bold green]{'�-^' * filled}[/][dim]{'�-`' * empty}[/]"
 				console.print(f"{i:02d}: {bar} ({val})")
 
 
 class Decruncher:
-	def __init__(self, src = None):
+	def __init__(self, src = None, options = None):
 
 		self.src = src
+		self.options = options or Options()
 		self.decrunch()
 				
 	def decrunch(self, src = None):
@@ -535,11 +535,11 @@ class Decruncher:
 				
 				code = self.src[i]
 				if ((code & 0x80 == LITERALMASK) and code & 0x7f < 32) :
-										
+									
 					run = (code & 0x1f)
 					chunk = self.src[i + 1 : i + run + 1]
-					if REVERSELITERAL:
-						chunk.reverse()
+					if self.options.reverse_literal:
+						chunk = chunk[::-1]
 					self.decrunched.extend(chunk)
 					i+=run + 1
 					nlit+=1
@@ -591,20 +591,20 @@ class Decruncher:
 			while self.src[i] != TERMINATOR:
 				code = self.src[i]
 				if ((code & 0x80 == LITERALMASK) and code & 0x7f < 32):
-					token_ids.append(LITERALID)
+					token_ids.append(TokenType.LITERAL)
 					run = (code & 0x1f)
 					i += run + 1
 				elif (code & 0x80 == LZ2MASK):
-					token_ids.append(LZ2ID)
+					token_ids.append(TokenType.LZ2)
 					i += 1
 				elif (code & 0x81) == RLEMASK and (code & 0x7e) != 0:
-					token_ids.append(RLEID)
+					token_ids.append(TokenType.RLE)
 					i += 2
 				elif (code & 0x81) == RLEMASK and (code & 0x7e) == 0:
-					token_ids.append(ZERORUNID)
+					token_ids.append(TokenType.ZERORUN)
 					i += 1
 				else:
-					token_ids.append(LZID)
+					token_ids.append(TokenType.LZ)
 					if (code & 2) == 2:
 						i += 2
 					else:
@@ -617,7 +617,7 @@ class Decruncher:
 
 			# Print the transition frequencies (filtered for freq >= 5)
 			print("\nToken transitions (most common followers):\n")
-			token_names = {LITERALID: "LIT", RLEID: "RLE", LZID: "LZ", LZ2ID: "LZ2", ZERORUNID: "ZERO"}
+			token_names = {TokenType.LITERAL: "LIT", TokenType.RLE: "RLE", TokenType.LZ: "LZ", TokenType.LZ2: "LZ2", TokenType.ZERORUN: "ZERO"}
 			for t, counter in transitions.items():
 				sorted_followers = [(token_names.get(k, k), v) for k, v in counter.items() if v >= 1]
 				sorted_followers.sort(key=lambda x: -x[1])
@@ -625,6 +625,7 @@ class Decruncher:
 					print(f"{token_names.get(t, t)}: ", end='')
 					print(", ".join(f"{k}({v})" for k, v in sorted_followers))
 	
+
 def usage():
 	print ("TSCrunch 1.3.1 - binary cruncher, by Antonio Savona")
 	print ("Usage: tscrunch [-p] [-i] [-r] [-q] [-x[2] $addr] infile outfile")
@@ -638,63 +639,68 @@ def usage():
 
 if __name__ == "__main__":
 
+	options = Options()
+	addr = None
+
 	if "-h" in sys.argv or len(sys.argv) < 3:
 		usage()
 	else:
 	
 		if "-q" in sys.argv:
-			VERBOSE = False
+			options.verbose = False
 
 		if "-x" in sys.argv:
-			SFX = True
-			SFXMODE = 0
-			PRG = True
+			options.sfx = True
+			options.sfxmode = 0
+			options.prg = True
 			jmp_str = sys.argv[sys.argv.index("-x") + 1].strip("$")
 			jmp = int(jmp_str, base = 16)
 		
 		if "-x2" in sys.argv:
-			SFX = True
-			SFXMODE = 1
-			PRG = True
+			options.sfx = True
+			options.sfxmode = 1
+			options.prg = True
 			jmp_str = sys.argv[sys.argv.index("-x2") + 1].strip("$")
 			jmp = int(jmp_str, base = 16)
 		
 		if "-b" in sys.argv:
-			BLANK = True
+			options.blank = True
 		
 		if "-i" in sys.argv:
-			INPLACE = True
-			PRG = True
+			options.inplace = True
+			options.prg = True
 			
 		if "-p" in sys.argv:
-			PRG = True
+			options.prg = True
 		
-		if SFX and INPLACE:
+		if options.sfx and options.inplace:
 			sys.stderr.write ("Can't create an sfx prg with inplace crunching\n")
 			exit(-1)
-			
-		fr = open(sys.argv[-2], "rb")
-		src = load_raw(fr)
+		
+		with open(sys.argv[-2], "rb") as fr:
+			src = load_raw(fr)
 
 		sourceLen = len(src)
 		
 		decrunchTo = 0
 		loadTo = 0
 		
-		if PRG:
+		if options.prg:
 			addr = src[:2]
 			src = src[2:]		
 			decrunchTo = addr[0] + 256 * addr[1]
 
-		cruncher = Cruncher(src)
+		cruncher = Cruncher(src, options = options, addr = addr if options.prg else None)
 		cruncher.ocrunch()
 		
-		if SFX:
-			if SFXMODE == 0:
+		if options.sfx:
+			if options.sfxmode == 0:
 				gap = 0
-				if BLANK:
-					boot = blank_boot
+				if options.blank:
+					boot = blank_boot[:]
 					gap = 5
+				else:
+					boot = boot[:]
 				
 				fileLen = len(boot) + len(cruncher.crunched)
 				startAddress = 0x10000 - len(cruncher.crunched)
@@ -715,7 +721,7 @@ if __name__ == "__main__":
 				boot[0xcc + gap] = cruncher.optimalRun - 1
 			
 			else:
-				boot = boot2
+				boot = boot2[:]
 				fileLen = len(boot) + len(cruncher.crunched)
 				startAddress = 0x10000 - len(cruncher.crunched)
 				transfAddress =  fileLen + 0x6ff
@@ -742,29 +748,25 @@ if __name__ == "__main__":
 			
 		decrunchEnd = decrunchTo + len(src) - 1
 		
-		if INPLACE:
+		if options.inplace:
 			loadTo = decrunchEnd - len(cruncher.crunched) + 1
 			cruncher.prepend([loadTo & 255, loadTo >> 8])
 			
-		fo = open(sys.argv[-1], "wb")
-
-		save_raw(fo, cruncher.crunched)
-		fo.close()
+		with open(sys.argv[-1], "wb") as fo:
+			save_raw(fo, cruncher.crunched)
 		
-		if VERBOSE:
+		if options.verbose:
 			ratio = (float(cruncher.crunchedSize) * 100.0 / sourceLen)
 			print ("input file  %s: %s, $%04x - $%04x : %d bytes" 
-			  %("PRG" if PRG else "RAW", sys.argv[-2], decrunchTo, decrunchEnd, sourceLen))
+			  %("PRG" if options.prg else "RAW", sys.argv[-2], decrunchTo, decrunchEnd, sourceLen))
 			print ("output file %s: %s, $%04x - $%04x : %d bytes" 
-			  %("PRG" if SFX or INPLACE else "RAW", sys.argv[-1],  loadTo, cruncher.crunchedSize + loadTo - 1, cruncher.crunchedSize))
+			  %("PRG" if options.sfx or options.inplace else "RAW", sys.argv[-1],  loadTo, cruncher.crunchedSize + loadTo - 1, cruncher.crunchedSize))
 			print ("crunched to %.2f%% of original size" %ratio)
 			
-		if DEBUG and not (SFX or INPLACE):
-			decruncher = Decruncher(cruncher.crunched)
+		if options.debug and not (options.sfx or options.inplace):
+			decruncher = Decruncher(cruncher.crunched, options = options)
 		
-			fo = open("test.raw", "wb")
-
-			save_raw(fo, decruncher.decrunched)
-			fo.close()
+			with open("test.raw", "wb") as fo:
+				save_raw(fo, decruncher.decrunched)
 		
 			assert(decruncher.decrunched == src)
