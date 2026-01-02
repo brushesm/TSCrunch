@@ -59,6 +59,20 @@ If you want the C99 encoder (tscrunch.c), you can build it with a standard C com
 
 	cc -std=c99 -O2 -o tscrunch.exe tscrunch.c
 
+Building the Java encoder
+=========================
+
+The Java encoder is provided as TSCrunch.java. It embeds the boot code, so it is standalone.
+
+Compile and package:
+
+	javac TSCrunch.java
+	jar --create --file tscrunch.jar --main-class TSCrunch TSCrunch*.class
+
+Run:
+
+	java -jar tscrunch.jar [options] infile outfile
+
 Self-check mode
 ===============
 
