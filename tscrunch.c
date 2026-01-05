@@ -925,6 +925,7 @@ int main(int argc, char **argv) {
         free(src);
         return 1;
     }
+    int file_len = crunched_len;
 
     if (opt.sfx) {
         const uint8_t *boot_src = NULL;
@@ -956,9 +957,9 @@ int main(int argc, char **argv) {
         }
         memcpy(boot_buf, boot_src, (size_t)boot_len);
 
-        int file_len = boot_len + crunched_len;
+        int sfx_file_len = boot_len + crunched_len;
         int start_address = 0x10000 - crunched_len;
-        int transf_address = file_len + 0x6ff;
+        int transf_address = sfx_file_len + 0x6ff;
 
         if (opt.sfxmode == 0) {
             boot_buf[0x1e + gap] = (uint8_t)(transf_address & 0xff);
@@ -1004,6 +1005,7 @@ int main(int argc, char **argv) {
         free(crunched);
         crunched = final_out;
         crunched_len += boot_len;
+        file_len = crunched_len;
         load_to = 0x0801;
     }
 
@@ -1023,10 +1025,10 @@ int main(int argc, char **argv) {
         memcpy(final_out + 2, crunched, (size_t)crunched_len);
         free(crunched);
         crunched = final_out;
-        crunched_len += 2;
+        file_len = crunched_len + 2;
     }
 
-    if (!save_file(out_path, crunched, (size_t)crunched_len)) {
+    if (!save_file(out_path, crunched, (size_t)file_len)) {
         fprintf(stderr, "Failed to write output file\n");
         free(crunched);
         free(src);

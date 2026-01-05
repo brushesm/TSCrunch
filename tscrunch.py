@@ -748,9 +748,9 @@ if __name__ == "__main__":
 			
 		decrunchEnd = decrunchTo + len(src) - 1
 		
-		if options.inplace:
-			loadTo = decrunchEnd - len(cruncher.crunched) + 1
-			cruncher.prepend([loadTo & 255, loadTo >> 8])
+	if options.inplace:
+		loadTo = decrunchEnd - len(cruncher.crunched) + 1
+		cruncher.prepend([loadTo & 255, loadTo >> 8])
 			
 		with open(sys.argv[-1], "wb") as fo:
 			save_raw(fo, cruncher.crunched)
